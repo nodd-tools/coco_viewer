@@ -1,6 +1,7 @@
 let cocoData;
 let currentIndex = 0;
 let annotationsVisible = true;
+let imageScaled = true; // Default to scaled (fit to screen)
 let globalLineOptions = {};
 
 // Expanded colorblind-safe palette (merged from Set1, Set2, Dark2, Paired, filtered)
@@ -120,6 +121,9 @@ async function loadCOCO(url, overrideLineOptions = {}) {
   // Update dropdown to match detected type
   if(typeSelect) typeSelect.value = detectedType;
 
+  // Initialize scale state
+  updateImageScale();
+  
   showImage(0);
 }
 
@@ -132,7 +136,10 @@ function drawAnnotations(lineOpts = {}) {
   const canvas = document.getElementById('annotation-canvas');
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
+  
+  // Clear the canvas in its natural resolution
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+  
   if (!annotationsVisible) return;
 
   const imgData = cocoData.images[currentIndex];
@@ -160,22 +167,21 @@ function drawAnnotation(ctx, ann, lineOpts) {
     if (ann.bbox) {
       const [x, y, w, h] = ann.bbox;
       ctx.strokeStyle = catOptions.color;
-      ctx.lineWidth = 3; // Slightly thicker for visibility
-      ctx.strokeRect(x, y, w, h);
       
-      // Optional: Add a slight fill to make it pop
-      ctx.fillStyle = catOptions.color.replace(')', ', 0.1)').replace('rgb', 'rgba'); 
-      if (!ctx.fillStyle.startsWith('rgba') && ctx.fillStyle.startsWith('#')) {
-         // rough hex to rgba conversion for fill
-         // skipped for simplicity in keeping original logic pure, but kept stroke
-      }
+      // Calculate line width relative to canvas size to ensure visibility
+      // If canvas is huge (4000px), a 2px line might be too thin when scaled down.
+      // Let's use a base width of 3, but scaled slightly if the image is massive
+      const baseLW = Math.max(3, ctx.canvas.width / 500); 
+      ctx.lineWidth = baseLW; 
+
+      ctx.strokeRect(x, y, w, h);
     }
     return;
   }
 
-  // Fallback / Default to Keypoint Logic (Original)
+  // Fallback / Default to Keypoint Logic
   const kp = ann.keypoints;
-  if (!kp) return; // Prevent crash if keypoints are missing in keypoint mode
+  if (!kp) return; 
 
   const points = [];
   for (let i = 0; i < kp.length; i += 3) {
@@ -184,6 +190,10 @@ function drawAnnotation(ctx, ann, lineOpts) {
   }
 
   if (!category.skeleton) return;
+  
+  // Scale line width for keypoints too
+  const baseLW = Math.max(2, ctx.canvas.width / 600);
+  ctx.lineWidth = baseLW;
 
   category.skeleton.forEach(([i, j]) => {
     const pt1 = points[i - 1];
@@ -207,7 +217,7 @@ function drawAnnotation(ctx, ann, lineOpts) {
  */
 function drawEdge(ctx, pt1, pt2, color = 'blue', lineEnd = 'circle') {
   ctx.strokeStyle = color;
-  ctx.lineWidth = 2;
+  // lineWidth is set in drawAnnotation now
   ctx.beginPath();
   ctx.moveTo(...pt1);
   ctx.lineTo(...pt2);
@@ -219,29 +229,23 @@ function drawEdge(ctx, pt1, pt2, color = 'blue', lineEnd = 'circle') {
 
 /**
  * Draw a circle at the end of a line.
- *
- * @param {CanvasRenderingContext2D} ctx
- * @param {[number, number]} pt1
- * @param {[number, number]} pt2
- * @param {string} color
  */
 function drawCircle(ctx, pt1, pt2, color) {
+  // Scale radius based on image size
+  const r = Math.max(3, ctx.canvas.width / 500);
   ctx.beginPath();
-  ctx.arc(...pt2, 3, 0, 2 * Math.PI);
+  ctx.arc(...pt2, r, 0, 2 * Math.PI);
   ctx.fillStyle = color;
   ctx.fill();
 }
 
 /**
  * Draw an arrowhead at the end of a line.
- *
- * @param {CanvasRenderingContext2D} ctx
- * @param {[number, number]} pt1
- * @param {[number, number]} pt2
- * @param {string} color
  */
 function drawArrow(ctx, pt1, pt2, color) {
-  const headLength = 10;
+  // Scale head length based on image size
+  const headLength = Math.max(10, ctx.canvas.width / 200);
+  
   const dx = pt2[0] - pt1[0];
   const dy = pt2[1] - pt1[1];
   const angle = Math.atan2(dy, dx);
@@ -273,10 +277,14 @@ function showImage(index) {
   const canvas = document.getElementById('annotation-canvas');
 
   imageElement.onload = () => {
-    canvas.width = imageElement.width;
-    canvas.height = imageElement.height;
-    canvas.style.width = imageElement.width + 'px';
-    canvas.style.height = imageElement.height + 'px';
+    // IMPORTANT: Set canvas internal resolution to match the image's NATURAL size.
+    // CSS will handle the display scaling of both image and canvas.
+    canvas.width = imageElement.naturalWidth;
+    canvas.height = imageElement.naturalHeight;
+    
+    // We do NOT set canvas.style.width/height here anymore, 
+    // we let CSS (width: 100%) handle that to match the image container.
+    
     drawAnnotations(globalLineOptions);
   };
 
@@ -293,16 +301,33 @@ window.prevImage = function () {
 
 window.toggleAnnotations = function () {
   annotationsVisible = !annotationsVisible;
-  // Update the switch UI if this was triggered programmatically
   const switchEl = document.getElementById('toggleSwitch');
   if (switchEl) switchEl.checked = annotationsVisible;
-  
   drawAnnotations(globalLineOptions);
 };
 
 window.updateAnnotationType = function () {
   drawAnnotations(globalLineOptions);
 };
+
+window.toggleImageScale = function () {
+  const checkbox = document.getElementById('scaleSwitch');
+  imageScaled = checkbox ? checkbox.checked : true;
+  updateImageScale();
+}
+
+function updateImageScale() {
+  const container = document.getElementById('image-container');
+  if (!container) return;
+  
+  if (imageScaled) {
+    container.classList.add('fit-screen');
+    container.classList.remove('original-size');
+  } else {
+    container.classList.remove('fit-screen');
+    container.classList.add('original-size');
+  }
+}
 
 window.main = function () {
   const url = document.getElementById('json-url').value;

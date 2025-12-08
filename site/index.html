@@ -60,6 +60,12 @@
           <input class="form-check-input" type="checkbox" role="switch" id="toggleSwitch" checked onclick="toggleAnnotations()">
           <label class="form-check-label" for="toggleSwitch">Show Annotations</label>
         </div>
+
+        <!-- Scale Image Toggle -->
+        <div class="form-check form-switch mb-3">
+          <input class="form-check-input" type="checkbox" role="switch" id="scaleSwitch" checked onclick="toggleImageScale()">
+          <label class="form-check-label" for="scaleSwitch">Scale Image to Fit</label>
+        </div>
       </div>
 
       <!-- Legend Section -->
@@ -73,17 +79,19 @@
     </div>
   </div>
 
-  <!-- Main View Area -->
-  <div class="container-fluid p-3 d-flex flex-column align-items-center" style="min-height: calc(100vh - 60px);">
+  <!-- Main View Area 
+       Added 'overflow-auto' to allow scrolling when image is unscaled 
+  -->
+  <div class="container-fluid p-3 d-flex flex-column align-items-center overflow-auto" style="height: calc(100vh - 60px);">
     
     <!-- Image Display -->
-    <div id="image-container" class="shadow-lg border border-secondary rounded mb-3 bg-black">
-      <img id="coco-image" class="img-fluid" style="max-height: 80vh;" />
+    <div id="image-container" class="shadow-lg border border-secondary rounded mb-3 bg-black fit-screen">
+      <img id="coco-image" />
       <canvas id="annotation-canvas"></canvas>
     </div>
 
     <!-- Navigation Controls (Floating or Bottom) -->
-    <div class="btn-group shadow">
+    <div class="btn-group shadow flex-shrink-0">
       <button class="btn btn-dark border-secondary px-4" onclick="prevImage()">
         <i class="bi bi-arrow-left"></i> Previous
       </button>
@@ -91,7 +99,7 @@
         Next <i class="bi bi-arrow-right"></i>
       </button>
     </div>
-    <div class="text-muted small mt-2">
+    <div class="text-muted small mt-2 flex-shrink-0">
       Use <kbd class="bg-secondary">←</kbd> and <kbd class="bg-secondary">→</kbd> arrow keys to navigate
     </div>
 
