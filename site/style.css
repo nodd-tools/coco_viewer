@@ -13,6 +13,6 @@
   margin: 10px 0;
 }
 
-button {
+button, select {
   margin-right: 10px;
 }

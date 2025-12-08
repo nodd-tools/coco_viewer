@@ -15,6 +15,12 @@
   <button onclick="prevImage()">← Prev</button>
   <button onclick="nextImage()">Next →</button>
   <button onclick="toggleAnnotations()">Toggle Annotations</button>
+  
+  <!-- Added Dropdown for Annotation Type -->
+  <select id="annotation-type" onchange="updateAnnotationType()">
+    <option value="keypoint">Keypoints</option>
+    <option value="bbox">Bounding Boxes</option>
+  </select>
 
   <div style="position: relative; display: inline-block;">
     <img id="coco-image" />
@@ -25,4 +31,3 @@
   <div id="legend" style="margin-top: 1em;"></div>
 </body>
 </html>
-

@@ -96,6 +96,24 @@ async function loadCOCO(url, overrideLineOptions = {}) {
   globalLineOptions = generateCategoryColors(cocoData.categories, overrideLineOptions);
   generateLegend(cocoData.categories, globalLineOptions);
 
+  // Auto-detect format logic
+  const typeSelect = document.getElementById('annotation-type');
+  let detectedType = 'keypoint'; // Default fallback
+  
+  // Find the first annotation that has either keypoints or bbox to determine type
+  const validAnn = cocoData.annotations.find(a => (a.keypoints && a.keypoints.length) || a.bbox);
+  
+  if (validAnn) {
+    if (validAnn.keypoints && validAnn.keypoints.length > 0) {
+      detectedType = 'keypoint';
+    } else if (validAnn.bbox && validAnn.bbox.length === 4) {
+      detectedType = 'bbox';
+    }
+  }
+  
+  // Update dropdown to match detected type
+  typeSelect.value = detectedType;
+
   showImage(0);
 }
 
@@ -124,9 +142,25 @@ function drawAnnotations(lineOpts = {}) {
  * @param {Object} lineOpts
  */
 function drawAnnotation(ctx, ann, lineOpts) {
-  const kp = ann.keypoints;
   const category = cocoData.categories.find(c => c.id === ann.category_id);
   const catOptions = lineOpts[category.id] || { color: 'blue' };
+  
+  // Check dropdown for mode
+  const mode = document.getElementById('annotation-type').value;
+
+  if (mode === 'bbox') {
+    if (ann.bbox) {
+      const [x, y, w, h] = ann.bbox;
+      ctx.strokeStyle = catOptions.color;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x, y, w, h);
+    }
+    return;
+  }
+
+  // Fallback / Default to Keypoint Logic (Original)
+  const kp = ann.keypoints;
+  if (!kp) return; // Prevent crash if keypoints are missing in keypoint mode
 
   const points = [];
   for (let i = 0; i < kp.length; i += 3) {
@@ -247,6 +281,10 @@ window.toggleAnnotations = function () {
   drawAnnotations(globalLineOptions);
 };
 
+window.updateAnnotationType = function () {
+  drawAnnotations(globalLineOptions);
+};
+
 window.main = function () {
   const url = document.getElementById('json-url').value;
   loadCOCO(url, lineOptions);
@@ -259,4 +297,3 @@ window.addEventListener('keydown', (e) => {
     window.prevImage();
   }
 });
-
