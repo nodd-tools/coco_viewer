@@ -64,8 +64,8 @@ function generateLegend(categories, lineOpts) {
     div.style.alignItems = 'center';
     div.style.marginBottom = '4px';
     div.innerHTML = `
-      <div style="width: 16px; height: 16px; background: ${color}; margin-right: 8px;"></div>
-      <span>${cat.name}</span>
+      <div style="width: 16px; height: 16px; background: ${color}; margin-right: 8px; border-radius: 2px;"></div>
+      <span class="small text-light">${cat.name}</span>
     `;
     legend.appendChild(div);
   });
@@ -78,8 +78,14 @@ function generateLegend(categories, lineOpts) {
  * @param {Object} overrideLineOptions
  */
 async function loadCOCO(url, overrideLineOptions = {}) {
-  const response = await fetch(url);
-  cocoData = await response.json();
+  try {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+    cocoData = await response.json();
+  } catch (e) {
+    alert("Failed to load JSON: " + e.message);
+    return;
+  }
 
   cocoData.imageMap = {};
   cocoData.annotationsByImage = {};
@@ -112,7 +118,7 @@ async function loadCOCO(url, overrideLineOptions = {}) {
   }
   
   // Update dropdown to match detected type
-  typeSelect.value = detectedType;
+  if(typeSelect) typeSelect.value = detectedType;
 
   showImage(0);
 }
@@ -124,6 +130,7 @@ async function loadCOCO(url, overrideLineOptions = {}) {
  */
 function drawAnnotations(lineOpts = {}) {
   const canvas = document.getElementById('annotation-canvas');
+  if (!canvas) return;
   const ctx = canvas.getContext('2d');
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   if (!annotationsVisible) return;
@@ -146,14 +153,22 @@ function drawAnnotation(ctx, ann, lineOpts) {
   const catOptions = lineOpts[category.id] || { color: 'blue' };
   
   // Check dropdown for mode
-  const mode = document.getElementById('annotation-type').value;
+  const modeElement = document.getElementById('annotation-type');
+  const mode = modeElement ? modeElement.value : 'keypoint';
 
   if (mode === 'bbox') {
     if (ann.bbox) {
       const [x, y, w, h] = ann.bbox;
       ctx.strokeStyle = catOptions.color;
-      ctx.lineWidth = 2;
+      ctx.lineWidth = 3; // Slightly thicker for visibility
       ctx.strokeRect(x, y, w, h);
+      
+      // Optional: Add a slight fill to make it pop
+      ctx.fillStyle = catOptions.color.replace(')', ', 0.1)').replace('rgb', 'rgba'); 
+      if (!ctx.fillStyle.startsWith('rgba') && ctx.fillStyle.startsWith('#')) {
+         // rough hex to rgba conversion for fill
+         // skipped for simplicity in keeping original logic pure, but kept stroke
+      }
     }
     return;
   }
@@ -278,6 +293,10 @@ window.prevImage = function () {
 
 window.toggleAnnotations = function () {
   annotationsVisible = !annotationsVisible;
+  // Update the switch UI if this was triggered programmatically
+  const switchEl = document.getElementById('toggleSwitch');
+  if (switchEl) switchEl.checked = annotationsVisible;
+  
   drawAnnotations(globalLineOptions);
 };
 

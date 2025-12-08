@@ -2,32 +2,102 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>COCO Viewer</title>
+  
+  <!-- Bootstrap 5 CSS -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <!-- Bootstrap Icons -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+  
   <link rel="stylesheet" href="style.css" />
   <script type="module" src="coco_viewer.js"></script>
 </head>
-<body>
-  <h1>COCO Annotation Viewer</h1>
+<body class="bg-dark text-light">
 
-  <label for="json-url">COCO JSON URL:</label>
-  <input type="text" id="json-url" size="80" />
-  <button onclick="main()">Load</button>
-  <button onclick="prevImage()">← Prev</button>
-  <button onclick="nextImage()">Next →</button>
-  <button onclick="toggleAnnotations()">Toggle Annotations</button>
-  
-  <!-- Added Dropdown for Annotation Type -->
-  <select id="annotation-type" onchange="updateAnnotationType()">
-    <option value="keypoint">Keypoints</option>
-    <option value="bbox">Bounding Boxes</option>
-  </select>
+  <!-- Navbar -->
+  <nav class="navbar navbar-dark bg-dark border-bottom border-secondary">
+    <div class="container-fluid">
+      <div class="d-flex align-items-center">
+        <button class="btn btn-outline-light me-3" type="button" data-bs-toggle="offcanvas" data-bs-target="#sidebarControls" aria-controls="sidebarControls">
+          <i class="bi bi-list"></i> Menu
+        </button>
+        <span class="navbar-brand mb-0 h1">COCO Annotation Viewer</span>
+      </div>
+    </div>
+  </nav>
 
-  <div style="position: relative; display: inline-block;">
-    <img id="coco-image" />
-    <canvas id="annotation-canvas" style="position: absolute; top: 0; left: 0;"></canvas>
+  <!-- Offcanvas Sidebar -->
+  <div class="offcanvas offcanvas-start text-bg-dark" tabindex="-1" id="sidebarControls" aria-labelledby="sidebarControlsLabel">
+    <div class="offcanvas-header border-bottom border-secondary">
+      <h5 class="offcanvas-title" id="sidebarControlsLabel">Controls</h5>
+      <button type="button" class="btn-close btn-close-white" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+    </div>
+    <div class="offcanvas-body">
+      
+      <!-- Load Section -->
+      <div class="mb-4">
+        <label for="json-url" class="form-label text-secondary fw-bold text-uppercase small">Data Source</label>
+        <div class="input-group mb-2">
+          <input type="text" class="form-control bg-dark text-light border-secondary" id="json-url" placeholder="https://..." value="annotations.json">
+          <button class="btn btn-primary" onclick="main()">Load</button>
+        </div>
+      </div>
+
+      <!-- Settings Section -->
+      <div class="mb-4">
+        <label class="form-label text-secondary fw-bold text-uppercase small">View Settings</label>
+        
+        <div class="mb-3">
+          <label for="annotation-type" class="form-label small">Annotation Format</label>
+          <select class="form-select bg-dark text-light border-secondary" id="annotation-type" onchange="updateAnnotationType()">
+            <option value="keypoint">Keypoints</option>
+            <option value="bbox">Bounding Boxes</option>
+          </select>
+        </div>
+
+        <div class="form-check form-switch mb-3">
+          <input class="form-check-input" type="checkbox" role="switch" id="toggleSwitch" checked onclick="toggleAnnotations()">
+          <label class="form-check-label" for="toggleSwitch">Show Annotations</label>
+        </div>
+      </div>
+
+      <!-- Legend Section -->
+      <div class="mb-4">
+        <label class="form-label text-secondary fw-bold text-uppercase small">Legend</label>
+        <div id="legend" class="border border-secondary rounded p-2" style="min-height: 50px; background: rgba(255,255,255,0.05);">
+          <small class="text-muted fst-italic">Load data to see categories...</small>
+        </div>
+      </div>
+
+    </div>
   </div>
 
-  <!-- 🟩 Add this to display the legend -->
-  <div id="legend" style="margin-top: 1em;"></div>
+  <!-- Main View Area -->
+  <div class="container-fluid p-3 d-flex flex-column align-items-center" style="min-height: calc(100vh - 60px);">
+    
+    <!-- Image Display -->
+    <div id="image-container" class="shadow-lg border border-secondary rounded mb-3 bg-black">
+      <img id="coco-image" class="img-fluid" style="max-height: 80vh;" />
+      <canvas id="annotation-canvas"></canvas>
+    </div>
+
+    <!-- Navigation Controls (Floating or Bottom) -->
+    <div class="btn-group shadow">
+      <button class="btn btn-dark border-secondary px-4" onclick="prevImage()">
+        <i class="bi bi-arrow-left"></i> Previous
+      </button>
+      <button class="btn btn-dark border-secondary px-4" onclick="nextImage()">
+        Next <i class="bi bi-arrow-right"></i>
+      </button>
+    </div>
+    <div class="text-muted small mt-2">
+      Use <kbd class="bg-secondary">←</kbd> and <kbd class="bg-secondary">→</kbd> arrow keys to navigate
+    </div>
+
+  </div>
+
+  <!-- Bootstrap JS Bundle -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>

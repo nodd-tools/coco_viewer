@@ -1,18 +1,36 @@
+/* The image container needs to be relative so the canvas 
+   can be absolutely positioned on top of the image 
+*/
 #image-container {
   position: relative;
   display: inline-block;
+  overflow: hidden; /* Ensures rounded corners work */
+}
+
+#coco-image {
+  display: block; /* Removes bottom spacing in inline-block */
+  max-width: 100%;
+  height: auto;
 }
 
 #annotation-canvas {
   position: absolute;
   top: 0;
   left: 0;
+  pointer-events: none; /* Allows right-clicking the image through the canvas */
 }
 
-#controls {
-  margin: 10px 0;
+/* Custom scrollbar for the sidebar for a sleeker look */
+.offcanvas-body::-webkit-scrollbar {
+  width: 8px;
 }
-
-button, select {
-  margin-right: 10px;
+.offcanvas-body::-webkit-scrollbar-track {
+  background: #212529; 
+}
+.offcanvas-body::-webkit-scrollbar-thumb {
+  background: #495057; 
+  border-radius: 4px;
+}
+.offcanvas-body::-webkit-scrollbar-thumb:hover {
+  background: #6c757d; 
 }
