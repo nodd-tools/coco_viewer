@@ -1,0 +1,18 @@
+#image-container {
+  position: relative;
+  display: inline-block;
+}
+
+#annotation-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+#controls {
+  margin: 10px 0;
+}
+
+button {
+  margin-right: 10px;
+}

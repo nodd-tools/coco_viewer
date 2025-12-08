@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>COCO Viewer</title>
+  <link rel="stylesheet" href="style.css" />
+  <script type="module" src="coco_viewer.js"></script>
+</head>
+<body>
+  <h1>COCO Annotation Viewer</h1>
+
+  <label for="json-url">COCO JSON URL:</label>
+  <input type="text" id="json-url" size="80" />
+  <button onclick="main()">Load</button>
+  <button onclick="prevImage()">← Prev</button>
+  <button onclick="nextImage()">Next →</button>
+  <button onclick="toggleAnnotations()">Toggle Annotations</button>
+
+  <div style="position: relative; display: inline-block;">
+    <img id="coco-image" />
+    <canvas id="annotation-canvas" style="position: absolute; top: 0; left: 0;"></canvas>
+  </div>
+
+  <!-- 🟩 Add this to display the legend -->
+  <div id="legend" style="margin-top: 1em;"></div>
+</body>
+</html>
+
