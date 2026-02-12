@@ -55,6 +55,28 @@
         <button class="btn btn-primary w-100 mt-2" onclick="main()">Load Data</button>
       </div>
 
+      <!-- Filtering Section (New) -->
+      <div class="mb-4">
+        <label class="form-label text-secondary fw-bold text-uppercase small">Filtering</label>
+        
+        <div class="mb-3">
+          <div class="d-flex justify-content-between">
+            <label for="conf-slider" class="form-label small">Min Confidence</label>
+            <span id="conf-val" class="small font-monospace text-info">0.00</span>
+          </div>
+          <input type="range" class="form-range" id="conf-slider" min="0" max="1" step="0.01" value="0.00" oninput="updateFilters()">
+        </div>
+
+        <div class="mb-3">
+          <div class="d-flex justify-content-between">
+            <label for="nms-slider" class="form-label small">NMS Threshold (IoU)</label>
+            <span id="nms-val" class="small font-monospace text-info">1.00</span>
+          </div>
+          <input type="range" class="form-range" id="nms-slider" min="0" max="1" step="0.01" value="1.00" oninput="updateFilters()">
+          <div class="form-text text-secondary small fst-italic" style="font-size: 0.75rem;">1.00 = No NMS. Lower = Stricter.</div>
+        </div>
+      </div>
+
       <!-- Navigation Section -->
       <div class="mb-4">
         <label class="form-label text-secondary fw-bold text-uppercase small">Navigation</label>

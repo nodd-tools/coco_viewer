@@ -8,6 +8,10 @@ let imageScaled = true;
 let hierarchyExpandMode = 'best'; // 'collapsed', 'expanded', 'best'
 let globalLineOptions = {};
 
+// Filter State
+let minConfidence = 0.0;
+let nmsIoU = 1.0;
+
 // Track selection
 let selectedAnnotation = null;
 
@@ -187,6 +191,161 @@ async function loadCOCO(url, hierUrl = null, overrideLineOptions = {}) {
   showImage(0);
 }
 
+// ---- Helper Logic: Pipeline Filtering ----
+
+/**
+ * Calculates IoU (Intersection over Union) between two annotations.
+ * Expects ann.bbox = [x, y, w, h]
+ */
+function calculateIoU(boxA, boxB) {
+  const [xA, yA, wA, hA] = boxA;
+  const [xB, yB, wB, hB] = boxB;
+
+  const interX1 = Math.max(xA, xB);
+  const interY1 = Math.max(yA, yB);
+  const interX2 = Math.min(xA + wA, xB + wB);
+  const interY2 = Math.min(yA + hA, yB + hB);
+
+  const interW = Math.max(0, interX2 - interX1);
+  const interH = Math.max(0, interY2 - interY1);
+  
+  const intersectionArea = interW * interH;
+  const areaA = wA * hA;
+  const areaB = wB * hB;
+  
+  const unionArea = areaA + areaB - intersectionArea;
+  
+  if (unionArea <= 0) return 0;
+  return intersectionArea / unionArea;
+}
+
+/**
+ * Gets the Root Category ID for an annotation.
+ * If flat/no hierarchy, returns the category_id itself.
+ */
+function getRootId(ann) {
+  let node = categoryNodeMap.get(ann.category_id);
+  // Traverse up to the root
+  while (node && node.parent) {
+    node = node.parent;
+  }
+  return node ? node.categoryId : ann.category_id;
+}
+
+/**
+ * Gets the Score used for filtering.
+ * Uses Root Node score if scores array exists, otherwise uses assigned category score.
+ */
+function getFilterScore(ann) {
+  // If no scores array, treat as 100% confidence so it doesn't get filtered out
+  if (!ann.scores || ann.scores.length === 0) return 1.0;
+
+  const rootId = getRootId(ann);
+  
+  // Return score of the root (implicit hierarchy scope)
+  if (ann.scores[rootId] !== undefined) {
+    return ann.scores[rootId];
+  }
+  
+  // Fallback
+  return 0.0;
+}
+
+/**
+ * The Filtering Pipeline.
+ * Stage 1: Confidence Filter (Gatekeeper)
+ * Stage 2: NMS (Strict suppression)
+ */
+function getFilteredAnnotations() {
+  if (!cocoData || !cocoData.images) return [];
+  const imgData = cocoData.images[currentIndex];
+  const rawAnns = cocoData.annotationsByImage[imgData.id] || [];
+
+  // --- STAGE 1: CONFIDENCE FILTER ---
+  let survivors = rawAnns.filter(ann => {
+    const score = getFilterScore(ann);
+    return score >= minConfidence;
+  });
+
+  // --- STAGE 2: NMS ---
+  // If IoU slider is at 1.0, we skip NMS entirely (optimization)
+  if (nmsIoU >= 1.0) {
+    return survivors;
+  }
+
+  // Pre-calculate effective scores for sorting
+  // We need to keep the original objects, so we map wrapper objects
+  let candidates = survivors.map(ann => ({
+    ann: ann,
+    score: getFilterScore(ann),
+    rootId: getRootId(ann),
+    hasBox: (ann.bbox && ann.bbox.length === 4)
+  }));
+
+  // Sort by Score Descending
+  candidates.sort((a, b) => b.score - a.score);
+
+  const finalSet = [];
+  const suppressedIndices = new Set();
+
+  for (let i = 0; i < candidates.length; i++) {
+    if (suppressedIndices.has(i)) continue;
+
+    const current = candidates[i];
+    finalSet.push(current.ann);
+
+    // If this annotation has no box, it cannot suppress others (skip NMS logic for it)
+    if (!current.hasBox) continue;
+
+    for (let j = i + 1; j < candidates.length; j++) {
+      if (suppressedIndices.has(j)) continue;
+      
+      const other = candidates[j];
+      
+      // Keypoint-only annotations (no box) are never suppressed
+      if (!other.hasBox) continue;
+
+      // NMS Scope: Root-Specific
+      // Only suppress if they share the same Root
+      if (current.rootId !== other.rootId) continue;
+
+      const iou = calculateIoU(current.ann.bbox, other.ann.bbox);
+      if (iou > nmsIoU) {
+        suppressedIndices.add(j);
+      }
+    }
+  }
+
+  return finalSet;
+}
+
+window.updateFilters = function() {
+  const confSlider = document.getElementById('conf-slider');
+  const nmsSlider = document.getElementById('nms-slider');
+  const confLabel = document.getElementById('conf-val');
+  const nmsLabel = document.getElementById('nms-val');
+
+  if (confSlider) {
+    minConfidence = parseFloat(confSlider.value);
+    confLabel.textContent = minConfidence.toFixed(2);
+  }
+  
+  if (nmsSlider) {
+    nmsIoU = parseFloat(nmsSlider.value);
+    nmsLabel.textContent = nmsIoU.toFixed(2);
+  }
+
+  // Deselect if the selected annotation was filtered out
+  const filtered = getFilteredAnnotations();
+  if (selectedAnnotation && !filtered.find(a => a.id === selectedAnnotation.id)) {
+    selectedAnnotation = null;
+    updateDetailsPanel(null);
+  }
+
+  drawAnnotations(globalLineOptions);
+}
+
+
 // ---- Canvas Interaction Logic ----
 
 window.addEventListener('load', () => {
@@ -221,12 +380,13 @@ function handleCanvasClick(e) {
 
   console.log(`Click Event: (${clickX.toFixed(1)}, ${clickY.toFixed(1)})`);
 
-  const imgData = cocoData.images[currentIndex];
-  const anns = cocoData.annotationsByImage[imgData.id] || [];
+  // Use the Filtered List for hit-testing
+  const visibleAnns = getFilteredAnnotations();
 
   const candidates = [];
-  for (let i = anns.length - 1; i >= 0; i--) {
-    const ann = anns[i];
+  // Loop reverse to find top-most first
+  for (let i = visibleAnns.length - 1; i >= 0; i--) {
+    const ann = visibleAnns[i];
     if (ann.bbox) {
       const [x, y, w, h] = ann.bbox;
       if (clickX >= x && clickX <= x + w && clickY >= y && clickY <= y + h) {
@@ -427,8 +587,8 @@ function drawAnnotations(lineOpts = {}) {
   
   if (!annotationsVisible) return;
 
-  const imgData = cocoData.images[currentIndex];
-  const anns = cocoData.annotationsByImage[imgData.id] || [];
+  // Use the Filtered List for drawing
+  const anns = getFilteredAnnotations();
   
   anns.forEach(ann => drawAnnotation(ctx, ann, lineOpts));
 }
