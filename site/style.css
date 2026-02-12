@@ -14,6 +14,9 @@
   
   /* Prevent flexbox from crushing the container in "Original Size" mode */
   flex-shrink: 0; 
+  
+  /* Ensure cursor indicates interactivity when hovering over canvas */
+  cursor: crosshair;
 }
 
 /* MODE 1: Fit Screen (Scaled) 
@@ -51,7 +54,8 @@
   left: 0;
   width: 100%;
   height: 100%;
-  pointer-events: none;
+  /* Removed pointer-events: none to allow clicking */
+  /* pointer-events: none; */
 }
 
 /* Custom scrollbar for the sidebar */
@@ -67,4 +71,92 @@
 }
 .offcanvas-body::-webkit-scrollbar-thumb:hover {
   background: #6c757d; 
+}
+
+/* Score List Styling (Flat View) */
+.score-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 8px;
+  border-bottom: 1px solid #444;
+}
+.score-row:hover {
+  background-color: rgba(255,255,255,0.1);
+}
+.score-val {
+  font-family: monospace;
+  font-weight: bold;
+}
+.score-bar-bg {
+  height: 4px;
+  background: #444;
+  margin-top: 2px;
+  border-radius: 2px;
+  overflow: hidden;
+}
+.score-bar-fill {
+  height: 100%;
+  background-color: #0dcaf0; /* Bootstrap info color */
+}
+
+/* Hierarchy Tree Styling */
+details > summary {
+  list-style: none; /* Hide default triangle in some browsers */
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  transition: background 0.2s;
+  font-weight: bold;
+}
+details > summary::-webkit-details-marker {
+  display: none; /* Hide default triangle Chrome/Safari */
+}
+details > summary:hover {
+  background: rgba(255,255,255,0.1);
+}
+
+/* Custom indicators */
+details > summary::before {
+  content: "+";
+  display: inline-block;
+  width: 16px;
+  text-align: center;
+  margin-right: 5px;
+  color: #0dcaf0;
+  font-family: monospace;
+  font-weight: bold;
+  border: 1px solid #555;
+  border-radius: 2px;
+  background: #333;
+}
+
+details[open] > summary::before {
+  content: "-";
+  color: #ffc107;
+}
+
+/* Leaf nodes (no children) in tree */
+.tree-leaf {
+  padding: 4px 4px 4px 28px; /* Indent to align with text of parents */
+  border-bottom: 1px solid #333;
+}
+.tree-leaf:hover {
+  background: rgba(255,255,255,0.05);
+}
+
+.tree-children {
+  margin-left: 15px;
+  border-left: 1px solid #444;
+  padding-left: 5px;
+}
+
+/* Custom Score Visibility */
+.score-highlight {
+  color: #FFD700; /* Gold: High contrast, distinct "best" indicator */
+  font-weight: bold;
+}
+
+.score-normal {
+  color: #E0E0E0; /* Off-white: Much more legible than text-muted on dark bg */
+  opacity: 0.9;
 }

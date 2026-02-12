@@ -1,10 +1,19 @@
 let cocoData;
+let hierarchyRoots = null; // Will hold the root nodes of the hierarchy tree
+let categoryNodeMap = new Map(); // Global lookup: categoryId -> Node
 let currentIndex = 0;
 let annotationsVisible = true;
-let imageScaled = true; // Default to scaled (fit to screen)
+let labelsVisible = false; // Toggle for text labels
+let imageScaled = true;
+let hierarchyExpandMode = 'best'; // 'collapsed', 'expanded', 'best'
 let globalLineOptions = {};
 
-// Expanded colorblind-safe palette (merged from Set1, Set2, Dark2, Paired, filtered)
+// Track selection
+let selectedAnnotation = null;
+
+// Bootstrap offcanvas instance
+let detailsPanel = null;
+
 const defaultPalette = [
   '#E41A1C', '#377EB8', '#4DAF4A', '#984EA3',
   '#FF7F00', '#FFFF33', '#A65628', '#F781BF',
@@ -16,19 +25,8 @@ const defaultPalette = [
   '#FB9A99', '#E31A1C', '#FDBF6F', '#CAB2D6', '#6A3D9A'
 ];
 
-/**
- * All categories will draw arrows at the end of each skeleton edge.
- * Colors are auto-assigned.
- */
-const lineOptions = {}; // populated in loadCOCO for all categories with default arrows
+const lineOptions = {}; 
 
-/**
- * Generate a lineOptions object per category with default colors and arrows.
- *
- * @param {Array} categories - Array of COCO category objects
- * @param {Object} overrides - Partial overrides for specific categories
- * @returns {Object} - lineOptions by category ID
- */
 function generateCategoryColors(categories, overrides = {}) {
   const options = {};
   categories.forEach((cat, idx) => {
@@ -49,12 +47,6 @@ function generateCategoryColors(categories, overrides = {}) {
   return options;
 }
 
-/**
- * Create and populate a legend showing each category and its color.
- *
- * @param {Array} categories
- * @param {Object} lineOpts
- */
 function generateLegend(categories, lineOpts) {
   const legend = document.getElementById('legend');
   legend.innerHTML = '';
@@ -73,12 +65,56 @@ function generateLegend(categories, lineOpts) {
 }
 
 /**
- * Load COCO JSON and initialize image and annotation structures.
- *
- * @param {string} url
- * @param {Object} overrideLineOptions
+ * Builds a tree structure from COCO categories and a flat parent-child map.
+ * Also populates the global categoryNodeMap.
  */
-async function loadCOCO(url, overrideLineOptions = {}) {
+function buildHierarchyTree(categories, hierarchyMap) {
+  categoryNodeMap.clear();
+  const nodeMap = new Map();
+
+  const getNode = (name) => {
+    if (!nodeMap.has(name)) {
+      // Node structure now includes 'parent' for upward traversal
+      nodeMap.set(name, { name: name, children: [], categoryId: null, parent: null, hasParent: false });
+    }
+    return nodeMap.get(name);
+  };
+
+  // Add all COCO categories to registry
+  categories.forEach(cat => {
+    const node = getNode(cat.name);
+    node.categoryId = cat.id;
+    categoryNodeMap.set(cat.id, node);
+  });
+
+  // Process Hierarchy relationships
+  if (hierarchyMap) {
+    Object.entries(hierarchyMap).forEach(([childName, parentName]) => {
+      const childNode = getNode(childName);
+      const parentNode = getNode(parentName);
+      
+      // Avoid duplicates
+      if (!parentNode.children.includes(childNode)) {
+        parentNode.children.push(childNode);
+        childNode.parent = parentNode; // Link parent
+      }
+      
+      childNode.hasParent = true;
+    });
+  }
+
+  // Identify Roots
+  const roots = [];
+  for (const node of nodeMap.values()) {
+    if (!node.hasParent) {
+      roots.push(node);
+    }
+  }
+
+  return roots;
+}
+
+async function loadCOCO(url, hierUrl = null, overrideLineOptions = {}) {
   try {
     const response = await fetch(url);
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
@@ -87,6 +123,38 @@ async function loadCOCO(url, overrideLineOptions = {}) {
     alert("Failed to load JSON: " + e.message);
     return;
   }
+
+  // --- DATA SANITIZATION ---
+  if (cocoData.annotations) {
+    cocoData.annotations.forEach(ann => {
+      if (ann.scores && Array.isArray(ann.scores)) {
+        ann.scores = ann.scores.map(x => {
+          const n = Number(x);
+          return isNaN(n) ? 0 : n;
+        });
+      }
+    });
+  }
+
+  // --- HIERARCHY LOADING ---
+  // We ALWAYS build a tree. If no file is provided, we build a "flat" tree (map={}).
+  let hMap = {};
+  if (hierUrl && hierUrl.trim() !== '') {
+    try {
+      const hResp = await fetch(hierUrl);
+      if (hResp.ok) {
+        hMap = await hResp.json();
+        console.log("Hierarchy file loaded.");
+      } else {
+        console.warn("Hierarchy file not found. Defaulting to flat list.");
+      }
+    } catch (e) {
+      console.warn("Failed to load hierarchy:", e.message);
+    }
+  }
+  
+  hierarchyRoots = buildHierarchyTree(cocoData.categories, hMap);
+  console.log("Hierarchy Roots:", hierarchyRoots);
 
   cocoData.imageMap = {};
   cocoData.annotationsByImage = {};
@@ -103,13 +171,9 @@ async function loadCOCO(url, overrideLineOptions = {}) {
   globalLineOptions = generateCategoryColors(cocoData.categories, overrideLineOptions);
   generateLegend(cocoData.categories, globalLineOptions);
 
-  // Auto-detect format logic
   const typeSelect = document.getElementById('annotation-type');
-  let detectedType = 'keypoint'; // Default fallback
-  
-  // Find the first annotation that has either keypoints or bbox to determine type
+  let detectedType = 'keypoint'; 
   const validAnn = cocoData.annotations.find(a => (a.keypoints && a.keypoints.length) || a.bbox);
-  
   if (validAnn) {
     if (validAnn.keypoints && validAnn.keypoints.length > 0) {
       detectedType = 'keypoint';
@@ -117,107 +181,339 @@ async function loadCOCO(url, overrideLineOptions = {}) {
       detectedType = 'bbox';
     }
   }
-  
-  // Update dropdown to match detected type
   if(typeSelect) typeSelect.value = detectedType;
 
-  // Initialize scale state
   updateImageScale();
-  
   showImage(0);
 }
 
-/**
- * Draw all annotations for the current image.
- *
- * @param {Object} lineOpts
- */
+// ---- Canvas Interaction Logic ----
+
+window.addEventListener('load', () => {
+  const canvas = document.getElementById('annotation-canvas');
+  if (canvas) {
+    canvas.addEventListener('mousedown', handleCanvasClick);
+  }
+
+  const storedJson = localStorage.getItem('coco_json_url');
+  if (storedJson) {
+    const el = document.getElementById('json-url');
+    if (el) el.value = storedJson;
+  }
+  
+  const storedHier = localStorage.getItem('coco_hierarchy_url');
+  if (storedHier) {
+    const el = document.getElementById('hierarchy-url');
+    if (el) el.value = storedHier;
+  }
+});
+
+function handleCanvasClick(e) {
+  if (!cocoData || !cocoData.images) return;
+  
+  const canvas = document.getElementById('annotation-canvas');
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+  
+  const clickX = (e.clientX - rect.left) * scaleX;
+  const clickY = (e.clientY - rect.top) * scaleY;
+
+  console.log(`Click Event: (${clickX.toFixed(1)}, ${clickY.toFixed(1)})`);
+
+  const imgData = cocoData.images[currentIndex];
+  const anns = cocoData.annotationsByImage[imgData.id] || [];
+
+  const candidates = [];
+  for (let i = anns.length - 1; i >= 0; i--) {
+    const ann = anns[i];
+    if (ann.bbox) {
+      const [x, y, w, h] = ann.bbox;
+      if (clickX >= x && clickX <= x + w && clickY >= y && clickY <= y + h) {
+        candidates.push(ann);
+      }
+    }
+  }
+
+  console.log(`Candidates found: ${candidates.length}`, candidates.map(c => c.id));
+
+  if (candidates.length === 0) {
+    selectedAnnotation = null;
+    console.log("No candidates. Deselecting.");
+  } else {
+    const currentIndex = selectedAnnotation ? candidates.findIndex(c => c.id === selectedAnnotation.id) : -1;
+    console.log(`Current Selection ID: ${selectedAnnotation ? selectedAnnotation.id : 'null'} | Index in candidates: ${currentIndex}`);
+
+    if (currentIndex !== -1) {
+      const nextIndex = (currentIndex + 1) % candidates.length;
+      selectedAnnotation = candidates[nextIndex];
+      console.log(`Cycling to next index: ${nextIndex} (ID: ${selectedAnnotation.id})`);
+    } else {
+      selectedAnnotation = candidates[0];
+      console.log(`Selecting top-most: (ID: ${selectedAnnotation.id})`);
+    }
+  }
+
+  drawAnnotations(globalLineOptions);
+  updateDetailsPanel(selectedAnnotation);
+}
+
+function updateDetailsPanel(ann) {
+  if (!detailsPanel) {
+    const el = document.getElementById('sidebarDetails');
+    if (window.bootstrap) {
+      detailsPanel = new bootstrap.Offcanvas(el);
+    }
+  }
+
+  const contentDiv = document.getElementById('details-content');
+  
+  if (!ann) {
+    contentDiv.innerHTML = `
+      <div class="text-center text-secondary mt-5">
+        <i class="bi bi-hand-index fs-1"></i>
+        <p class="mt-2">Select an annotation on the image to view detailed probability scores.</p>
+      </div>`;
+    return;
+  }
+
+  if (detailsPanel) detailsPanel.show();
+
+  const category = cocoData.categories.find(c => c.id === ann.category_id);
+  const bestScore = (ann.scores && ann.scores[category.id] !== undefined) ? ann.scores[category.id] : null;
+
+  let html = `
+    <div class="mb-3 p-3 bg-secondary bg-opacity-10 rounded border border-secondary">
+      <h6 class="text-info text-uppercase small fw-bold mb-1">Selected Annotation</h6>
+      <div class="fs-4">${category.name}</div>
+      ${bestScore !== null ? `<div class="text-light">Confidence: <span class="fw-bold score-highlight">${bestScore.toFixed(4)}</span></div>` : ''}
+      <div class="small text-secondary mt-1">ID: ${ann.id}</div>
+    </div>
+  `;
+
+  html += `<h6 class="text-secondary text-uppercase small fw-bold mb-3 border-bottom border-secondary pb-2">Class Distribution</h6>`;
+  html += `<div class="d-flex flex-column gap-2">`;
+
+  // --- PATH CALCULATION ---
+  const truePathNodes = new Set();
+  const bestPathNodes = new Set();
+  
+  // 1. Identify True Path (Upward from Assigned Category)
+  let trueNode = categoryNodeMap.get(ann.category_id);
+  while(trueNode) {
+    truePathNodes.add(trueNode);
+    trueNode = trueNode.parent;
+  }
+
+  // 2. Identify Best Path (Downward from Roots using Scores)
+  // Only if scores exist
+  const hasScores = (ann.scores && ann.scores.length > 0);
+  
+  if (hasScores) {
+    const getScore = (n) => {
+      if (n.categoryId === null) return -1;
+      const val = ann.scores[n.categoryId];
+      return (typeof val === 'number') ? val : -1;
+    };
+
+    let currentCandidates = hierarchyRoots;
+    while (currentCandidates && currentCandidates.length > 0) {
+      let bestNode = null;
+      let maxScore = -Infinity;
+      
+      for (const node of currentCandidates) {
+        const s = getScore(node);
+        if (s > maxScore) {
+          maxScore = s;
+          bestNode = node;
+        }
+      }
+      
+      if (bestNode && maxScore > -1) {
+        bestPathNodes.add(bestNode);
+        currentCandidates = bestNode.children;
+      } else {
+        break; 
+      }
+    }
+  }
+
+  // --- RECURSIVE RENDERER ---
+  const renderNode = (node) => {
+    let score = (hasScores && node.categoryId !== null && ann.scores[node.categoryId] !== undefined) 
+                  ? ann.scores[node.categoryId] 
+                  : null;
+    
+    // Highlights
+    const isTruePath = truePathNodes.has(node);
+    const isBestPath = bestPathNodes.has(node);
+
+    // Text Class Logic
+    // Precedence: Best Path (Gold) > True Path (Cyan) > Default
+    let textClass = '';
+    if (isBestPath) {
+      textClass = 'score-highlight'; 
+    } else if (isTruePath) {
+      textClass = 'text-info fw-bold';
+    }
+
+    // Score Class: Best Path gets 'score-highlight' (Gold), others 'score-normal'
+    const scoreClass = isBestPath ? 'score-highlight' : 'score-normal';
+
+    const scoreDisplay = score !== null 
+      ? `<span class="${scoreClass} ms-2">${score.toFixed(4)}</span>` 
+      : '';
+      
+    // Determine "Open" state
+    let isOpen = false;
+    if (hierarchyExpandMode === 'expanded') {
+      isOpen = true;
+    } else if (hierarchyExpandMode === 'best') {
+      // Open if this node is on EITHER the True Path or Best Path
+      if (isTruePath || isBestPath) isOpen = true;
+    }
+
+    // Leaf Node
+    if (node.children.length === 0) {
+      return `
+        <div class="tree-leaf">
+           <span class="${textClass}">${node.name}</span>${scoreDisplay}
+        </div>
+      `;
+    } 
+    
+    // Parent Node
+    const childrenHtml = node.children
+      .sort((a,b) => a.name.localeCompare(b.name)) 
+      .map(child => renderNode(child))
+      .join('');
+
+    return `
+      <details ${isOpen ? 'open' : ''}>
+        <summary class="${textClass}">
+          ${node.name} ${scoreDisplay}
+        </summary>
+        <div class="tree-children">
+          ${childrenHtml}
+        </div>
+      </details>
+    `;
+  };
+
+  if (hierarchyRoots) {
+    html += hierarchyRoots.map(root => renderNode(root)).join('');
+  }
+  
+  html += `</div>`;
+  contentDiv.innerHTML = html;
+}
+
+window.updateHierarchyExpandMode = function() {
+  const el = document.getElementById('hierarchy-expand');
+  if (el) {
+    hierarchyExpandMode = el.value;
+    if (selectedAnnotation) {
+      updateDetailsPanel(selectedAnnotation);
+    }
+  }
+}
+
 function drawAnnotations(lineOpts = {}) {
   const canvas = document.getElementById('annotation-canvas');
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
   
-  // Clear the canvas in its natural resolution
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   
   if (!annotationsVisible) return;
 
   const imgData = cocoData.images[currentIndex];
   const anns = cocoData.annotationsByImage[imgData.id] || [];
-
+  
   anns.forEach(ann => drawAnnotation(ctx, ann, lineOpts));
 }
 
-/**
- * Draw skeleton edges for a single annotation.
- *
- * @param {CanvasRenderingContext2D} ctx
- * @param {Object} ann
- * @param {Object} lineOpts
- */
 function drawAnnotation(ctx, ann, lineOpts) {
   const category = cocoData.categories.find(c => c.id === ann.category_id);
   const catOptions = lineOpts[category.id] || { color: 'blue' };
-  
-  // Check dropdown for mode
+  const isSelected = (selectedAnnotation && selectedAnnotation.id === ann.id);
+
   const modeElement = document.getElementById('annotation-type');
   const mode = modeElement ? modeElement.value : 'keypoint';
+
+  if (isSelected) {
+    if (ann.bbox) {
+      const [x, y, w, h] = ann.bbox;
+      ctx.save();
+      ctx.strokeStyle = 'white';
+      const baseLW = Math.max(3, ctx.canvas.width / 500);
+      ctx.lineWidth = baseLW + 4; 
+      ctx.strokeRect(x, y, w, h);
+      ctx.restore();
+    }
+  }
 
   if (mode === 'bbox') {
     if (ann.bbox) {
       const [x, y, w, h] = ann.bbox;
       ctx.strokeStyle = catOptions.color;
-      
-      // Calculate line width relative to canvas size to ensure visibility
-      // If canvas is huge (4000px), a 2px line might be too thin when scaled down.
-      // Let's use a base width of 3, but scaled slightly if the image is massive
       const baseLW = Math.max(3, ctx.canvas.width / 500); 
       ctx.lineWidth = baseLW; 
-
       ctx.strokeRect(x, y, w, h);
     }
-    return;
-  }
-
-  // Fallback / Default to Keypoint Logic
-  const kp = ann.keypoints;
-  if (!kp) return; 
-
-  const points = [];
-  for (let i = 0; i < kp.length; i += 3) {
-    const x = kp[i], y = kp[i + 1];
-    points.push([x, y]);
-  }
-
-  if (!category.skeleton) return;
-  
-  // Scale line width for keypoints too
-  const baseLW = Math.max(2, ctx.canvas.width / 600);
-  ctx.lineWidth = baseLW;
-
-  category.skeleton.forEach(([i, j]) => {
-    const pt1 = points[i - 1];
-    const pt2 = points[j - 1];
-    if (pt1 && pt2) {
-      const edgeOpts = (catOptions.end && catOptions.end[j]) || {};
-      const lineEnd = edgeOpts.lineEnd || 'circle';
-      drawEdge(ctx, pt1, pt2, catOptions.color, lineEnd);
+  } else {
+    const kp = ann.keypoints;
+    if (kp) {
+      const points = [];
+      for (let i = 0; i < kp.length; i += 3) {
+        points.push([kp[i], kp[i + 1]]);
+      }
+      if (category.skeleton) {
+        const baseLW = Math.max(2, ctx.canvas.width / 600);
+        ctx.lineWidth = baseLW;
+        category.skeleton.forEach(([i, j]) => {
+          const pt1 = points[i - 1];
+          const pt2 = points[j - 1];
+          if (pt1 && pt2) {
+            const edgeOpts = (catOptions.end && catOptions.end[j]) || {};
+            const lineEnd = edgeOpts.lineEnd || 'circle';
+            drawEdge(ctx, pt1, pt2, catOptions.color, lineEnd);
+          }
+        });
+      }
     }
-  });
+  }
+
+  if (labelsVisible && ann.bbox) {
+    const [x, y, w, h] = ann.bbox;
+    let labelText = category.name;
+    
+    if (ann.scores && ann.scores[category.id] !== undefined) {
+      labelText += ` (${ann.scores[category.id].toFixed(2)})`;
+    }
+
+    ctx.save();
+    const fontSize = Math.max(12, ctx.canvas.width / 60); 
+    ctx.font = `bold ${fontSize}px sans-serif`;
+    ctx.textBaseline = 'top';
+    
+    const textMetrics = ctx.measureText(labelText);
+    const textHeight = fontSize * 1.2;
+    const padding = 4;
+    const bgWidth = textMetrics.width + (padding * 2);
+    const bgHeight = textHeight;
+
+    ctx.fillStyle = catOptions.color; 
+    ctx.fillRect(x, y - bgHeight, bgWidth, bgHeight);
+    
+    ctx.fillStyle = 'white'; 
+    ctx.fillText(labelText, x + padding, y - bgHeight + (padding/2));
+    ctx.restore();
+  }
 }
 
-/**
- * Draw a line segment with a specific end decoration.
- *
- * @param {CanvasRenderingContext2D} ctx
- * @param {[number, number]} pt1
- * @param {[number, number]} pt2
- * @param {string} color
- * @param {string} lineEnd
- */
 function drawEdge(ctx, pt1, pt2, color = 'blue', lineEnd = 'circle') {
   ctx.strokeStyle = color;
-  // lineWidth is set in drawAnnotation now
   ctx.beginPath();
   ctx.moveTo(...pt1);
   ctx.lineTo(...pt2);
@@ -227,11 +523,7 @@ function drawEdge(ctx, pt1, pt2, color = 'blue', lineEnd = 'circle') {
   drawFn(ctx, pt1, pt2, color);
 }
 
-/**
- * Draw a circle at the end of a line.
- */
 function drawCircle(ctx, pt1, pt2, color) {
-  // Scale radius based on image size
   const r = Math.max(3, ctx.canvas.width / 500);
   ctx.beginPath();
   ctx.arc(...pt2, r, 0, 2 * Math.PI);
@@ -239,13 +531,8 @@ function drawCircle(ctx, pt1, pt2, color) {
   ctx.fill();
 }
 
-/**
- * Draw an arrowhead at the end of a line.
- */
 function drawArrow(ctx, pt1, pt2, color) {
-  // Scale head length based on image size
   const headLength = Math.max(10, ctx.canvas.width / 200);
-  
   const dx = pt2[0] - pt1[0];
   const dy = pt2[1] - pt1[1];
   const angle = Math.atan2(dy, dx);
@@ -263,41 +550,41 @@ const pointDrawerMap = {
   arrow: drawArrow
 };
 
-/**
- * Display the image at the given index.
- *
- * @param {number} index
- */
 function showImage(index) {
-  if (!cocoData || index < 0 || index >= cocoData.images.length) return;
+  if (!cocoData || !cocoData.images) return;
+  
+  if (index < 0) index = 0;
+  if (index >= cocoData.images.length) index = cocoData.images.length - 1;
 
   currentIndex = index;
+  
+  selectedAnnotation = null;
+  updateDetailsPanel(null);
+
   const imgData = cocoData.images[index];
   const imageElement = document.getElementById('coco-image');
   const canvas = document.getElementById('annotation-canvas');
-
+  
   imageElement.onload = () => {
-    // IMPORTANT: Set canvas internal resolution to match the image's NATURAL size.
-    // CSS will handle the display scaling of both image and canvas.
     canvas.width = imageElement.naturalWidth;
     canvas.height = imageElement.naturalHeight;
-    
-    // We do NOT set canvas.style.width/height here anymore, 
-    // we let CSS (width: 100%) handle that to match the image container.
-    
     drawAnnotations(globalLineOptions);
   };
 
   imageElement.src = imgData.coco_url;
 }
 
-window.nextImage = function () {
-  if (currentIndex < cocoData.images.length - 1) showImage(currentIndex + 1);
+window.navigate = function(delta) {
+  if (!cocoData) return;
+  const stepInput = document.getElementById('nav-step-size');
+  let step = parseInt(stepInput.value, 10);
+  if (isNaN(step) || step < 1) step = 1;
+  const newIndex = currentIndex + (delta * step);
+  showImage(newIndex);
 };
 
-window.prevImage = function () {
-  if (currentIndex > 0) showImage(currentIndex - 1);
-};
+window.nextImage = function () { window.navigate(1); };
+window.prevImage = function () { window.navigate(-1); };
 
 window.toggleAnnotations = function () {
   annotationsVisible = !annotationsVisible;
@@ -305,6 +592,11 @@ window.toggleAnnotations = function () {
   if (switchEl) switchEl.checked = annotationsVisible;
   drawAnnotations(globalLineOptions);
 };
+
+window.toggleLabels = function () {
+  labelsVisible = !labelsVisible;
+  drawAnnotations(globalLineOptions);
+}
 
 window.updateAnnotationType = function () {
   drawAnnotations(globalLineOptions);
@@ -319,7 +611,6 @@ window.toggleImageScale = function () {
 function updateImageScale() {
   const container = document.getElementById('image-container');
   if (!container) return;
-  
   if (imageScaled) {
     container.classList.add('fit-screen');
     container.classList.remove('original-size');
@@ -331,13 +622,34 @@ function updateImageScale() {
 
 window.main = function () {
   const url = document.getElementById('json-url').value;
-  loadCOCO(url, lineOptions);
+  const hierUrl = document.getElementById('hierarchy-url').value;
+
+  // Save to Local Storage
+  localStorage.setItem('coco_json_url', url);
+  localStorage.setItem('coco_hierarchy_url', hierUrl);
+
+  loadCOCO(url, hierUrl, lineOptions);
 };
 
 window.addEventListener('keydown', (e) => {
-  if (e.key === 'ArrowRight') {
-    window.nextImage();
-  } else if (e.key === 'ArrowLeft') {
-    window.prevImage();
+  const tag = e.target.tagName.toLowerCase();
+  if (tag === 'input' || tag === 'select' || tag === 'textarea') {
+    return;
+  }
+
+  const stepInput = document.getElementById('nav-step-size');
+  if (!stepInput) return;
+
+  const setStep = (val) => {
+    stepInput.value = val;
+  };
+
+  switch (e.key.toLowerCase()) {
+    case 'a': setStep(1); window.navigate(-1); break;
+    case 'd': setStep(1); window.navigate(1); break;
+    case 's': setStep(10); window.navigate(-1); break;
+    case 'w': setStep(10); window.navigate(1); break;
+    case 'q': setStep(100); window.navigate(-1); break;
+    case 'e': setStep(100); window.navigate(1); break;
   }
 });
