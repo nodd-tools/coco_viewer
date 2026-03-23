@@ -439,15 +439,66 @@ function updateDetailsPanel(ann) {
 
   if (detailsPanel) detailsPanel.show();
 
-  const category = cocoData.categories.find(c => c.id === ann.category_id);
-  const bestScore = (ann.scores && ann.scores[category.id] !== undefined) ? ann.scores[category.id] : null;
+  const originalCategory = cocoData.categories.find(c => c.id === ann.category_id);
+  
+  // --- DRILL DOWN LOGIC ---
+  // Start with the Root and drill down as long as Marginal Score > minConfidence
+  let displayCategoryName = originalCategory.name;
+  let displayScore = (ann.scores && ann.scores[originalCategory.id] !== undefined) ? ann.scores[originalCategory.id] : null;
+  
+  if (ann.scores && ann.scores.length > 0) {
+    // 1. Find Root Node
+    const rootId = getRootId(ann);
+    let currentNode = categoryNodeMap.get(rootId);
+    let currentMarginal = ann.scores[rootId] !== undefined ? ann.scores[rootId] : 0;
+
+    // If the root itself passes the threshold, we start tracking it
+    if (currentMarginal >= minConfidence) {
+      displayCategoryName = currentNode.name;
+      displayScore = currentMarginal;
+
+      // 2. Drill Down
+      while (true) {
+        let bestChild = null;
+        let bestChildMarginal = -1;
+
+        // Find best child based on Product of scores (Marginal Prob)
+        for (const child of currentNode.children) {
+          const childScore = ann.scores[child.categoryId] !== undefined ? ann.scores[child.categoryId] : 0;
+          const marginal = currentMarginal * childScore; // "root_conf * child_conf"
+          
+          if (marginal > bestChildMarginal) {
+            bestChildMarginal = marginal;
+            bestChild = child;
+          }
+        }
+
+        // 3. Gate Check
+        // Continue ONLY if the marginal score is still above threshold
+        if (bestChild && bestChildMarginal >= minConfidence) {
+          currentNode = bestChild;
+          currentMarginal = bestChildMarginal;
+          
+          // Update Display
+          displayCategoryName = currentNode.name;
+          displayScore = currentMarginal;
+        } else {
+          // Stop drilling
+          break;
+        }
+      }
+    }
+  }
 
   let html = `
     <div class="mb-3 p-3 bg-secondary bg-opacity-10 rounded border border-secondary">
       <h6 class="text-info text-uppercase small fw-bold mb-1">Selected Annotation</h6>
-      <div class="fs-4">${category.name}</div>
-      ${bestScore !== null ? `<div class="text-light">Confidence: <span class="fw-bold score-highlight">${bestScore.toFixed(4)}</span></div>` : ''}
-      <div class="small text-secondary mt-1">ID: ${ann.id}</div>
+      <div class="fs-4">${displayCategoryName}</div>
+      ${displayScore !== null ? `<div class="text-light">Marginal Conf: <span class="fw-bold score-highlight">${displayScore.toFixed(4)}</span></div>` : ''}
+      <div class="d-flex justify-content-between mt-2">
+        <span class="small text-secondary">ID: ${ann.id}</span>
+        ${originalCategory.name !== displayCategoryName ? `<span class="small text-secondary fst-italic">Labeled: ${originalCategory.name}</span>` : ''}
+      </div>
     </div>
   `;
 
