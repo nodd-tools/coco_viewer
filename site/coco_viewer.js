@@ -131,11 +131,22 @@ async function loadCOCO(url, hierUrl = null, overrideLineOptions = {}) {
   // --- DATA SANITIZATION ---
   if (cocoData.annotations) {
     cocoData.annotations.forEach(ann => {
-      if (ann.scores && Array.isArray(ann.scores)) {
-        ann.scores = ann.scores.map(x => {
+      // Backwards compatibility: map legacy 'scores' to standard KWCOCO 'prob'
+      if (ann.scores && Array.isArray(ann.scores) && !ann.prob) {
+        ann.prob = ann.scores;
+      }
+
+      if (ann.prob && Array.isArray(ann.prob)) {
+        ann.prob = ann.prob.map(x => {
           const n = Number(x);
           return isNaN(n) ? 0 : n;
         });
+      }
+      
+      // Also sanitize scalar score if present (KWCOCO / MSCOCO standard)
+      if (ann.score !== undefined) {
+        const n = Number(ann.score);
+        ann.score = isNaN(n) ? 0 : n;
       }
     });
   }
@@ -234,17 +245,19 @@ function getRootId(ann) {
 
 /**
  * Gets the Score used for filtering.
- * Uses Root Node score if scores array exists, otherwise uses assigned category score.
+ * Uses Root Node score if prob array exists, otherwise uses assigned category score.
  */
 function getFilterScore(ann) {
-  // If no scores array, treat as 100% confidence so it doesn't get filtered out
-  if (!ann.scores || ann.scores.length === 0) return 1.0;
+  // If no prob array, check for scalar score, otherwise treat as 100% confidence so it doesn't get filtered out
+  if (!ann.prob || ann.prob.length === 0) {
+    return ann.score !== undefined ? ann.score : 1.0;
+  }
 
   const rootId = getRootId(ann);
   
   // Return score of the root (implicit hierarchy scope)
-  if (ann.scores[rootId] !== undefined) {
-    return ann.scores[rootId];
+  if (ann.prob[rootId] !== undefined) {
+    return ann.prob[rootId];
   }
   
   // Fallback
@@ -444,13 +457,13 @@ function updateDetailsPanel(ann) {
   // --- DRILL DOWN LOGIC ---
   // Start with the Root and drill down as long as Marginal Score > minConfidence
   let displayCategoryName = originalCategory.name;
-  let displayScore = (ann.scores && ann.scores[originalCategory.id] !== undefined) ? ann.scores[originalCategory.id] : null;
+  let displayScore = (ann.prob && ann.prob[originalCategory.id] !== undefined) ? ann.prob[originalCategory.id] : (ann.score !== undefined ? ann.score : null);
   
-  if (ann.scores && ann.scores.length > 0) {
+  if (ann.prob && ann.prob.length > 0) {
     // 1. Find Root Node
     const rootId = getRootId(ann);
     let currentNode = categoryNodeMap.get(rootId);
-    let currentMarginal = ann.scores[rootId] !== undefined ? ann.scores[rootId] : 0;
+    let currentMarginal = ann.prob[rootId] !== undefined ? ann.prob[rootId] : 0;
 
     // If the root itself passes the threshold, we start tracking it
     if (currentMarginal >= minConfidence) {
@@ -464,7 +477,7 @@ function updateDetailsPanel(ann) {
 
         // Find best child based on Product of scores (Marginal Prob)
         for (const child of currentNode.children) {
-          const childScore = ann.scores[child.categoryId] !== undefined ? ann.scores[child.categoryId] : 0;
+          const childScore = ann.prob[child.categoryId] !== undefined ? ann.prob[child.categoryId] : 0;
           const marginal = currentMarginal * childScore; // "root_conf * child_conf"
           
           if (marginal > bestChildMarginal) {
@@ -517,13 +530,13 @@ function updateDetailsPanel(ann) {
   }
 
   // 2. Identify Best Path (Downward from Roots using Scores)
-  // Only if scores exist
-  const hasScores = (ann.scores && ann.scores.length > 0);
+  // Only if prob array exists
+  const hasProbs = (ann.prob && ann.prob.length > 0);
   
-  if (hasScores) {
+  if (hasProbs) {
     const getScore = (n) => {
       if (n.categoryId === null) return -1;
-      const val = ann.scores[n.categoryId];
+      const val = ann.prob[n.categoryId];
       return (typeof val === 'number') ? val : -1;
     };
 
@@ -551,8 +564,8 @@ function updateDetailsPanel(ann) {
 
   // --- RECURSIVE RENDERER ---
   const renderNode = (node) => {
-    let score = (hasScores && node.categoryId !== null && ann.scores[node.categoryId] !== undefined) 
-                  ? ann.scores[node.categoryId] 
+    let score = (hasProbs && node.categoryId !== null && ann.prob[node.categoryId] !== undefined) 
+                  ? ann.prob[node.categoryId] 
                   : null;
     
     // Highlights
@@ -699,8 +712,10 @@ function drawAnnotation(ctx, ann, lineOpts) {
     const [x, y, w, h] = ann.bbox;
     let labelText = category.name;
     
-    if (ann.scores && ann.scores[category.id] !== undefined) {
-      labelText += ` (${ann.scores[category.id].toFixed(2)})`;
+    if (ann.prob && ann.prob[category.id] !== undefined) {
+      labelText += ` (${ann.prob[category.id].toFixed(2)})`;
+    } else if (ann.score !== undefined) {
+      labelText += ` (${ann.score.toFixed(2)})`;
     }
 
     ctx.save();
