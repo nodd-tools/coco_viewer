@@ -475,13 +475,12 @@ function updateDetailsPanel(ann) {
         let bestChild = null;
         let bestChildMarginal = -1;
 
-        // Find best child based on Product of scores (Marginal Prob)
+        // Find best child based on Marginal Prob directly
         for (const child of currentNode.children) {
-          const childScore = ann.prob[child.categoryId] !== undefined ? ann.prob[child.categoryId] : 0;
-          const marginal = currentMarginal * childScore; // "root_conf * child_conf"
+          const childMarginal = ann.prob[child.categoryId] !== undefined ? ann.prob[child.categoryId] : 0;
           
-          if (marginal > bestChildMarginal) {
-            bestChildMarginal = marginal;
+          if (childMarginal > bestChildMarginal) {
+            bestChildMarginal = childMarginal;
             bestChild = child;
           }
         }
