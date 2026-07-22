@@ -18,9 +18,6 @@ let selectedAnnotation = null;
 // Bootstrap offcanvas instance
 let detailsPanel = null;
 
-// Optional Authentication State
-let googleAccessToken = null;
-
 const defaultPalette = [
   '#E41A1C', '#377EB8', '#4DAF4A', '#984EA3',
   '#FF7F00', '#FFFF33', '#A65628', '#F781BF',
@@ -122,16 +119,8 @@ function buildHierarchyTree(categories, hierarchyMap) {
 }
 
 async function loadCOCO(url, hierUrl = null, overrideLineOptions = {}) {
-  // Construct optional headers if the user has authenticated
-  const fetchOptions = {};
-  if (googleAccessToken) {
-    fetchOptions.headers = {
-      'Authorization': `Bearer ${googleAccessToken}`
-    };
-  }
-
   try {
-    const response = await fetch(url, fetchOptions);
+    const response = await fetch(url);
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
     cocoData = await response.json();
   } catch (e) {
@@ -167,7 +156,7 @@ async function loadCOCO(url, hierUrl = null, overrideLineOptions = {}) {
   let hMap = {};
   if (hierUrl && hierUrl.trim() !== '') {
     try {
-      const hResp = await fetch(hierUrl, fetchOptions);
+      const hResp = await fetch(hierUrl);
       if (hResp.ok) {
         hMap = await hResp.json();
         console.log("Hierarchy file loaded.");
@@ -212,27 +201,6 @@ async function loadCOCO(url, hierUrl = null, overrideLineOptions = {}) {
   updateImageScale();
   showImage(0);
 }
-
-/**
- * Optional Auth Hook
- * You can call this from a UI button using Google's lightweight Identity Services SDK.
- * It keeps the SDK logic separated from your core app logic.
- */
-window.authenticateWithGoogle = function() {
-  // Example implementation assuming the Google GIS library is loaded in your HTML
-  const client = google.accounts.oauth2.initTokenClient({
-    client_id: 'YOUR_GOOGLE_CLIENT_ID',
-    scope: 'https://www.googleapis.com/auth/devstorage.read_only',
-    callback: (response) => {
-      if (response && response.access_token) {
-        googleAccessToken = response.access_token;
-        console.log("Successfully authenticated. Ready to fetch private data.");
-        // Optionally auto-trigger main() here to load the data now that we have a token
-      }
-    }
-  });
-  client.requestAccessToken();
-};
 
 // ---- Helper Logic: Pipeline Filtering ----
 
@@ -507,13 +475,12 @@ function updateDetailsPanel(ann) {
         let bestChild = null;
         let bestChildMarginal = -1;
 
-        // Find best child based on Product of scores (Marginal Prob)
+        // Find best child based on Marginal Prob directly
         for (const child of currentNode.children) {
-          const childScore = ann.prob[child.categoryId] !== undefined ? ann.prob[child.categoryId] : 0;
-          const marginal = currentMarginal * childScore; // "root_conf * child_conf"
+          const childMarginal = ann.prob[child.categoryId] !== undefined ? ann.prob[child.categoryId] : 0;
           
-          if (marginal > bestChildMarginal) {
-            bestChildMarginal = marginal;
+          if (childMarginal > bestChildMarginal) {
+            bestChildMarginal = childMarginal;
             bestChild = child;
           }
         }
